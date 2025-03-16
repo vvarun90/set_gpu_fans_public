@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+#  Nvidia GPU Fan Control Script for Ubuntu 22.04
+
+# Ensure NVIDIA persistence mode is enabled
+/usr/bin/nvidia-persistenced --user $(whoami)
+
+gpuid=""
+
+if [[ $1 =~ ^[A-Fa-f0-9]*:[A-Fa-f0-9]*\.[A-Fa-f0-9]*$ ]]; then
+    gpuid=" -i $1 "
+    echo "Using GPU ID: $gpuid"
+    shift
+fi
+
+run_forever=0
+target=-3
+
+if [[ "$1" == "run_forever" ]]; then
+    run_forever=1
+    shift
+elif [[ "$1" == "stop" ]]; then
+    target=-1
+elif [[ -z "$1" || "$1" == "start" || "$1" == "-display" ]]; then
+    target=-3
+else
+    target=$1
+    shift
+fi
+
+last_target=-10
+last_friendly_target="UNKNOWN"
+
+while :; do
+    if [[ $target -eq -3 ]]; then
+        read -r _ _ temp _ < <(/usr/bin/nvidia-smi dmon -s p -c 1 $gpuid | tail -n 1)
+        target=-2
+
+        if (( temp < 30 )); then target=20; fi
+        if (( temp >= 30 && temp < 34 )); then target=30; fi
+        if (( temp >= 34 && temp < 38 )); then target=40; fi
+        if (( temp >= 38 && temp < 40 )); then target=45; fi
+        if (( temp >= 40 && temp < 43 )); then target=50; fi
+        if (( temp >= 43 && temp < 49 )); then target=60; fi
+        if (( temp >= 49 && temp < 54 )); then target=65; fi
+        if (( temp >= 54 && temp < 61 )); then target=75; fi
+        if (( temp >= 61 && temp < 65 )); then target=80; fi
+        if (( temp >= 65 && temp < 70 )); then target=85; fi
+        if (( temp >= 70 && temp < 77 )); then target=90; fi
+        if (( temp >= 77 )); then target=95; fi
+    fi
+
+    if [[ $target -ne -2 && $target -ne $last_target && $target -ne $last_friendly_target ]]; then
+        if [[ $target -eq -1 ]]; then
+            /usr/bin/nvidia-settings -a '[gpu:0]/GPUFanControlState=0'
+        elif [[ $target -ge 0 ]]; then
+            /usr/bin/nvidia-settings -a '[gpu:0]/GPUFanControlState=1' -a "[fan:0]/GPUTargetFanSpeed=$target"
+        fi
+    fi
+
+    last_target=$target
+    target=-3
+    last_friendly_target=$last_target
+
+    if [[ $last_target -eq -1 ]]; then
+        last_friendly_target="AUTO"
+    elif [[ $last_target -lt -2 ]]; then
+        last_friendly_target="UNKNOWN"
+    fi
+
+    sleep 15
+    [[ $run_forever -eq 1 ]] || break
+done
